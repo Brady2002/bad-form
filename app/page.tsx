@@ -6,10 +6,10 @@ const SIREN_URL =
   "https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg";
 
 // Sound effect URLs
-const WIN_SOUND = "https://actions.google.com/sounds/v1/games/arcade_game_jump.ogg";
-const LOSE_SOUND = "https://actions.google.com/sounds/v1/games/arcade_game_bonus.ogg";
-const TIE_SOUND = "https://actions.google.com/sounds/v1/games/arcade_game_powerup.ogg";
-const CLICK_SOUND = "https://actions.google.com/sounds/v1/buttons/button_click_off.ogg";
+const WIN_SOUND = "/rps/win.mp3";
+const LOSE_SOUND = "/rps/lose.mp3";
+const TIE_SOUND = "/rps/lose.mp3";
+const CLICK_SOUND = "/rps/click.mp3";
 
 // Captcha stages
 type CaptchaStage = "hidden" | "images" | "rps" | "complete";
@@ -271,13 +271,7 @@ export default function Home() {
     }
   };
 
-  const playSound = (soundRef: React.MutableRefObject<HTMLAudioElement | null>, url: string, fallbackType?: "win" | "lose" | "tie" | "click") => {
-    // Always use Web Audio API fallback for now since external URLs may fail
-    if (fallbackType) {
-      playFallbackSound(fallbackType);
-      return;
-    }
-
+  const playSound = (soundRef: React.MutableRefObject<HTMLAudioElement | null>, url: string) => {
     // Try to load external audio, but don't break if it fails
     try {
       if (!soundRef.current) {
@@ -336,53 +330,12 @@ export default function Home() {
     }
   };
 
-  const playFallbackSound = (type: "win" | "lose" | "tie" | "click") => {
-    try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-
-      const audioContext = new AudioContext();
-      
-      // Resume audio context if it's suspended (required by some browsers)
-      if (audioContext.state === "suspended") {
-        audioContext.resume();
-      }
-
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      // Different frequencies and patterns for different sounds
-      const soundConfig: Record<typeof type, { freq: number; duration: number; type: OscillatorType }> = {
-        win: { freq: 523.25, duration: 0.3, type: "sine" }, // C5 - ascending happy sound
-        lose: { freq: 196.00, duration: 0.2, type: "sine" }, // G3 - lower, sadder sound
-        tie: { freq: 329.63, duration: 0.15, type: "sine" }, // E4 - neutral sound
-        click: { freq: 800, duration: 0.05, type: "square" }, // High click
-      };
-
-      const config = soundConfig[type];
-      oscillator.frequency.value = config.freq;
-      oscillator.type = config.type;
-      
-      gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + config.duration);
-
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + config.duration);
-    } catch (error) {
-      // Silently fail if Web Audio API is not available
-      console.debug("Audio playback failed:", error);
-    }
-  };
-
   const handleRPSChoice = (choice: RPSChoice) => {
     if (rpsPlayerChoice || rpsAnimating) return; // Already made a choice or animating
     
     setRpsAnimating(true);
     setBotChoiceRevealed(false);
-    playSound(clickSoundRef, CLICK_SOUND, "click");
+    playSound(clickSoundRef, CLICK_SOUND);
     
     setRpsPlayerChoice(choice);
     
@@ -398,7 +351,7 @@ export default function Home() {
       setTimeout(() => {
         if (choice === botChoice) {
           setRpsResult("Tie! Try again.");
-          playSound(tieSoundRef, TIE_SOUND, "tie");
+          playSound(tieSoundRef, TIE_SOUND);
           setTimeout(() => {
             setRpsPlayerChoice(null);
             setRpsBotChoice(null);
@@ -413,7 +366,7 @@ export default function Home() {
         ) {
           setRpsResult("You win this round!");
           setShowConfetti(true);
-          playSound(winSoundRef, WIN_SOUND, "win");
+          playSound(winSoundRef, WIN_SOUND);
           playRPSChoiceSound(choice); // Play the winning choice's sound
           setRpsWins(rpsWins + 1);
           setTimeout(() => {
@@ -430,7 +383,7 @@ export default function Home() {
           }, 2000);
         } else {
           setRpsResult("You lose! Try again.");
-          playSound(loseSoundRef, LOSE_SOUND, "lose");
+          playSound(loseSoundRef, LOSE_SOUND);
           playRPSChoiceSound(botChoice); // Play the winning (bot's) choice's sound
           setTimeout(() => {
             setRpsPlayerChoice(null);
