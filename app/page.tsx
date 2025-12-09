@@ -5,6 +5,69 @@ import { useState, useRef, useEffect, ChangeEvent } from "react";
 const SIREN_URL =
   "https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg";
 
+// Sound effect URLs
+const WIN_SOUND = "https://actions.google.com/sounds/v1/games/arcade_game_jump.ogg";
+const LOSE_SOUND = "https://actions.google.com/sounds/v1/games/arcade_game_bonus.ogg";
+const TIE_SOUND = "https://actions.google.com/sounds/v1/games/arcade_game_powerup.ogg";
+const CLICK_SOUND = "https://actions.google.com/sounds/v1/buttons/button_click_off.ogg";
+
+// Captcha stages
+type CaptchaStage = "hidden" | "images" | "rps" | "complete";
+
+// Image captcha data - using local images
+// Fire hydrants (correct): IDs 1, 3, 5, 7, 9
+// Other images (incorrect): IDs 2, 4, 6, 8
+const CAPTCHA_IMAGES = [
+  { 
+    id: 1, 
+    url: "/captcha/hydrant1.png",
+    isCorrect: true 
+  },
+  { 
+    id: 2, 
+    url: "/captcha/other1.png",
+    isCorrect: false 
+  },
+  { 
+    id: 3, 
+    url: "/captcha/hydrant2.png",
+    isCorrect: true 
+  },
+  { 
+    id: 4, 
+    url: "/captcha/other2.png",
+    isCorrect: false 
+  },
+  { 
+    id: 5, 
+    url: "/captcha/other3.png",
+    isCorrect: false 
+  },
+  { 
+    id: 6, 
+    url: "/captcha/other4.png",
+    isCorrect: false 
+  },
+  { 
+    id: 7, 
+    url: "/captcha/other5.png",
+    isCorrect: false 
+  },
+  { 
+    id: 8, 
+    url: "/captcha/hydrant3.png",
+    isCorrect: true 
+  },
+  { 
+    id: 9, 
+    url: "/captcha/other6.png",
+    isCorrect: false 
+  },
+];
+
+// Rock Paper Scissors choices
+type RPSChoice = "rock" | "paper" | "scissors" | null;
+
 export default function Home() {
   const [dobColor, setDobColor] = useState("#8f8f8f");
   const [dobR, setDobR] = useState(18); // decoded "day"
@@ -16,6 +79,31 @@ export default function Home() {
   const sirenAudioRef = useRef<HTMLAudioElement | null>(null);
   const isEmailAlertActive =
     email.length > 0 && confirmEmail.length > 0 && email !== confirmEmail;
+
+  // RPS sound refs
+  const winSoundRef = useRef<HTMLAudioElement | null>(null);
+  const loseSoundRef = useRef<HTMLAudioElement | null>(null);
+  const tieSoundRef = useRef<HTMLAudioElement | null>(null);
+  const clickSoundRef = useRef<HTMLAudioElement | null>(null);
+  const rockSoundRef = useRef<HTMLAudioElement | null>(null);
+  const paperSoundRef = useRef<HTMLAudioElement | null>(null);
+  const scissorsSoundRef = useRef<HTMLAudioElement | null>(null);
+
+  // RPS animation states
+  const [rpsAnimating, setRpsAnimating] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [botChoiceRevealed, setBotChoiceRevealed] = useState(false);
+
+  // Captcha state
+  const [captchaStage, setCaptchaStage] = useState<CaptchaStage>("hidden");
+  const [showCaptchaModal, setShowCaptchaModal] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<number[]>([]);
+  const [imageCaptchaLoading, setImageCaptchaLoading] = useState(false);
+  const [imageCaptchaSuccess, setImageCaptchaSuccess] = useState(false);
+  const [rpsPlayerChoice, setRpsPlayerChoice] = useState<RPSChoice>(null);
+  const [rpsBotChoice, setRpsBotChoice] = useState<RPSChoice>(null);
+  const [rpsResult, setRpsResult] = useState<string>("");
+  const [rpsWins, setRpsWins] = useState(0);
 
   const handleDobColorChange = (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
@@ -122,6 +210,250 @@ export default function Home() {
     setConfirmEmail(value);
   };
 
+  // Captcha handlers
+  const handleOpenCaptcha = () => {
+    setShowCaptchaModal(true);
+    setCaptchaStage("images");
+    setSelectedImages([]);
+    setRpsWins(0);
+    setRpsPlayerChoice(null);
+    setRpsBotChoice(null);
+    setRpsResult("");
+    setRpsAnimating(false);
+    setShowConfetti(false);
+    setBotChoiceRevealed(false);
+    setImageCaptchaLoading(false);
+    setImageCaptchaSuccess(false);
+  };
+
+  const handleImageClick = (imageId: number) => {
+    if (selectedImages.includes(imageId)) {
+      setSelectedImages(selectedImages.filter((id) => id !== imageId));
+    } else {
+      setSelectedImages([...selectedImages, imageId]);
+    }
+  };
+
+  const handleImageCaptchaSubmit = () => {
+    if (imageCaptchaLoading) return; // Prevent multiple clicks
+    
+    setImageCaptchaLoading(true);
+    
+    // Simulate checking/verification delay
+    setTimeout(() => {
+      const correctImages = CAPTCHA_IMAGES.filter((img) => img.isCorrect).map((img) => img.id);
+      const selectedCorrect = selectedImages.filter((id) => correctImages.includes(id));
+      
+      // Check if all correct images are selected and no incorrect ones
+      if (
+        selectedCorrect.length === correctImages.length &&
+        selectedImages.length === correctImages.length
+      ) {
+        setImageCaptchaLoading(false);
+        setImageCaptchaSuccess(true);
+        // Show success message briefly before transitioning
+        setTimeout(() => {
+          setCaptchaStage("rps");
+          setImageCaptchaSuccess(false);
+        }, 1500); // Show success for 1.5 seconds
+      } else {
+        // Reset selection on wrong answer
+        setSelectedImages([]);
+        setImageCaptchaLoading(false);
+        alert("Please select all images with fire hydrants. Try again.");
+      }
+    }, 1500); // 1.5 second loading delay
+  };
+
+  const handleCloseCaptcha = () => {
+    if (captchaStage === "complete") {
+      setShowCaptchaModal(false);
+    }
+  };
+
+  const playSound = (soundRef: React.MutableRefObject<HTMLAudioElement | null>, url: string, fallbackType?: "win" | "lose" | "tie" | "click") => {
+    // Always use Web Audio API fallback for now since external URLs may fail
+    if (fallbackType) {
+      playFallbackSound(fallbackType);
+      return;
+    }
+
+    // Try to load external audio, but don't break if it fails
+    try {
+      if (!soundRef.current) {
+        soundRef.current = new Audio(url);
+        soundRef.current.addEventListener("error", () => {
+          // Silently fail - we're using fallback anyway
+        });
+      }
+      const audio = soundRef.current;
+      audio.currentTime = 0;
+      audio.volume = 0.5;
+      void audio.play().catch(() => {
+        // Silently fail
+      });
+    } catch {
+      // Silently fail
+    }
+  };
+
+  const playRPSChoiceSound = (choice: RPSChoice) => {
+    try {
+      let soundRef: React.MutableRefObject<HTMLAudioElement | null>;
+      let soundUrl: string;
+      
+      switch (choice) {
+        case "rock":
+          soundRef = rockSoundRef;
+          soundUrl = "/rps/rock.mp3";
+          break;
+        case "paper":
+          soundRef = paperSoundRef;
+          soundUrl = "/rps/paper.mp3";
+          break;
+        case "scissors":
+          soundRef = scissorsSoundRef;
+          soundUrl = "/rps/scissors.mp3";
+          break;
+        default:
+          return;
+      }
+      
+      if (!soundRef.current) {
+        soundRef.current = new Audio(soundUrl);
+        soundRef.current.addEventListener("error", () => {
+          console.debug("RPS sound failed to load:", soundUrl);
+        });
+      }
+      const audio = soundRef.current;
+      audio.currentTime = 0;
+      audio.volume = 0.7;
+      void audio.play().catch(() => {
+        // Silently fail
+      });
+    } catch (error) {
+      console.debug("RPS sound playback failed:", error);
+    }
+  };
+
+  const playFallbackSound = (type: "win" | "lose" | "tie" | "click") => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+
+      const audioContext = new AudioContext();
+      
+      // Resume audio context if it's suspended (required by some browsers)
+      if (audioContext.state === "suspended") {
+        audioContext.resume();
+      }
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      // Different frequencies and patterns for different sounds
+      const soundConfig: Record<typeof type, { freq: number; duration: number; type: OscillatorType }> = {
+        win: { freq: 523.25, duration: 0.3, type: "sine" }, // C5 - ascending happy sound
+        lose: { freq: 196.00, duration: 0.2, type: "sine" }, // G3 - lower, sadder sound
+        tie: { freq: 329.63, duration: 0.15, type: "sine" }, // E4 - neutral sound
+        click: { freq: 800, duration: 0.05, type: "square" }, // High click
+      };
+
+      const config = soundConfig[type];
+      oscillator.frequency.value = config.freq;
+      oscillator.type = config.type;
+      
+      gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + config.duration);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + config.duration);
+    } catch (error) {
+      // Silently fail if Web Audio API is not available
+      console.debug("Audio playback failed:", error);
+    }
+  };
+
+  const handleRPSChoice = (choice: RPSChoice) => {
+    if (rpsPlayerChoice || rpsAnimating) return; // Already made a choice or animating
+    
+    setRpsAnimating(true);
+    setBotChoiceRevealed(false);
+    playSound(clickSoundRef, CLICK_SOUND, "click");
+    
+    setRpsPlayerChoice(choice);
+    
+    // Animated reveal of bot choice
+    setTimeout(() => {
+      // Bot makes a random choice
+      const botChoices: RPSChoice[] = ["rock", "paper", "scissors"];
+      const botChoice = botChoices[Math.floor(Math.random() * botChoices.length)];
+      setRpsBotChoice(botChoice);
+      setBotChoiceRevealed(true);
+      
+      // Determine winner after a brief delay
+      setTimeout(() => {
+        if (choice === botChoice) {
+          setRpsResult("Tie! Try again.");
+          playSound(tieSoundRef, TIE_SOUND, "tie");
+          setTimeout(() => {
+            setRpsPlayerChoice(null);
+            setRpsBotChoice(null);
+            setRpsResult("");
+            setRpsAnimating(false);
+            setBotChoiceRevealed(false);
+          }, 2000);
+        } else if (
+          (choice === "rock" && botChoice === "scissors") ||
+          (choice === "paper" && botChoice === "rock") ||
+          (choice === "scissors" && botChoice === "paper")
+        ) {
+          setRpsResult("You win this round!");
+          setShowConfetti(true);
+          playSound(winSoundRef, WIN_SOUND, "win");
+          playRPSChoiceSound(choice); // Play the winning choice's sound
+          setRpsWins(rpsWins + 1);
+          setTimeout(() => {
+            setShowConfetti(false);
+            if (rpsWins + 1 >= 3) {
+              setCaptchaStage("complete");
+            } else {
+              setRpsPlayerChoice(null);
+              setRpsBotChoice(null);
+              setRpsResult("");
+              setRpsAnimating(false);
+              setBotChoiceRevealed(false);
+            }
+          }, 2000);
+        } else {
+          setRpsResult("You lose! Try again.");
+          playSound(loseSoundRef, LOSE_SOUND, "lose");
+          playRPSChoiceSound(botChoice); // Play the winning (bot's) choice's sound
+          setTimeout(() => {
+            setRpsPlayerChoice(null);
+            setRpsBotChoice(null);
+            setRpsResult("");
+            setRpsAnimating(false);
+            setBotChoiceRevealed(false);
+          }, 2000);
+        }
+      }, 500);
+    }, 300);
+  };
+
+  // Prevent closing modal unless captcha is complete
+  useEffect(() => {
+    if (captchaStage === "complete") {
+      // Auto-close after a moment
+      setTimeout(() => {
+        setShowCaptchaModal(false);
+      }, 1500);
+    }
+  }, [captchaStage]);
+
   return (
     <div
       className={`min-h-screen w-full bg-[#fffbf0] text-zinc-900 flex items-stretch justify-center ${
@@ -142,6 +474,10 @@ export default function Home() {
           className="px-6 pb-10 pt-5 text-sm sm:text-[13px] leading-tight space-y-7"
           onSubmit={(e) => {
             e.preventDefault();
+            if (captchaStage !== "complete") {
+              alert("Please complete the verification challenge first.");
+              return;
+            }
             alert(
               "Thank you for submitting absolutely nothing of value.\n\n(Also, none of this was saved.)"
             );
@@ -173,11 +509,14 @@ export default function Home() {
           </section>
 
           {/* Email section */}
-          <section className="grid sm:grid-cols-[3fr,2fr] gap-4 border-b border-black pb-5">
+          <section className="grid sm:grid-cols-[2fr,3fr] gap-4 border-b border-black pb-5">
             <div className="flex flex-col gap-1 order-2 sm:order-1">
               <label className="text-[10px] uppercase tracking-[0.3em]">
                 Email
               </label>
+              <p className="text-[11px] text-zinc-700">
+                For your security, we have obscured your email address.
+              </p>
               <input
                 id="email"
                 name="email"
@@ -192,7 +531,7 @@ export default function Home() {
                     : "border-zinc-500 focus:border-blue-700"
                 }`}
               />
-              <label className="text-[10px] uppercase tracking-[0.3em]">
+              <label className="text-[10px] uppercase tracking-[0.3em] mt-3">
                 Confirm Email
               </label>
               <input
@@ -259,12 +598,47 @@ export default function Home() {
             </div>
           </section>
 
+          {/* Captcha Section */}
+          <section className="grid sm:grid-cols-[2fr,3fr] gap-4 border-b border-black pb-5">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] uppercase tracking-[0.3em]">
+                Verification
+              </label>
+              <label className="font-semibold">
+                Security Verification
+              </label>
+              <p className="text-[11px] text-zinc-700">
+                Complete verification to submit form
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              {captchaStage === "complete" ? (
+                <div className="text-green-600 font-bold text-sm">
+                  ✓ Verification complete
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleOpenCaptcha}
+                  className="border border-black bg-[#6890d0] px-4 py-2 text-[11px] font-bold uppercase self-start hover:bg-blue-200"
+                >
+                  Verify you're human
+                </button>
+              )}
+            </div>
+          </section>
+
           {/* Buttons */}
           <section>
             <div className="flex flex-wrap gap-2 justify-end items-center">
               <button
                 type="submit"
-                className="border border-black bg-[#6890d0] px-4 py-2 text-[11px] font-bold uppercase shadow-[3px_3px_0_rgba(0,0,0,0.8)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none"
+                disabled={captchaStage !== "complete"}
+                className={`border border-black px-4 py-2 text-[11px] font-bold uppercase shadow-[3px_3px_0_rgba(0,0,0,0.8)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none ${
+                  captchaStage === "complete"
+                    ? "bg-[#6890d0] cursor-pointer"
+                    : "bg-gray-400 cursor-not-allowed opacity-60"
+                }`}
               >
                 Submit?
               </button>
@@ -272,6 +646,220 @@ export default function Home() {
           </section>
         </form>
       </main>
+
+      {/* Captcha Modal */}
+      {showCaptchaModal && (
+        <div 
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+          onClick={captchaStage === "complete" ? handleCloseCaptcha : undefined}
+        >
+          <div 
+            className="bg-white border-4 border-gray-800 shadow-2xl max-w-2xl w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4 pb-3 border-b-2 border-gray-300">
+              <h2 className="text-xl font-bold">Security Verification</h2>
+              {captchaStage === "complete" && (
+                <button
+                  onClick={handleCloseCaptcha}
+                  className="text-gray-600 hover:text-gray-800 text-2xl leading-none"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            {captchaStage === "images" && (
+              <div className="space-y-4">
+                {imageCaptchaSuccess ? (
+                  <div className="text-center py-8">
+                    <div className="text-green-600 text-5xl mb-4 animate-pulse">✓</div>
+                    <p className="text-xl font-bold text-green-600 mb-2">Verification Successful!</p>
+                    <p className="text-sm text-gray-600">Proceeding to next step...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="bg-blue-50 border-2 border-blue-300 p-3">
+                      <p className="font-semibold text-sm mb-1">Select all images with a fire hydrant</p>
+                      <p className="text-xs text-gray-600">Click verify once you're done</p>
+                    </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {CAPTCHA_IMAGES.map((image) => (
+                    <button
+                      key={image.id}
+                      type="button"
+                      onClick={() => handleImageClick(image.id)}
+                      className={`aspect-square border-2 relative overflow-hidden transition-all ${
+                        selectedImages.includes(image.id)
+                          ? "border-blue-600 bg-blue-100 ring-2 ring-blue-400"
+                          : "border-gray-300 hover:border-gray-500"
+                      }`}
+                    >
+                      <img 
+                        src={image.url} 
+                        alt="Captcha image" 
+                        className="w-full h-full object-cover"
+                      />
+                      {selectedImages.includes(image.id) && (
+                        <div className="absolute inset-0 bg-blue-500/30 flex items-center justify-center">
+                          <div className="bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
+                            ✓
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex justify-between items-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCaptchaModal(false)}
+                    disabled={imageCaptchaLoading}
+                    className="text-sm text-gray-600 hover:text-gray-800 underline disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImageCaptchaSubmit}
+                    disabled={imageCaptchaLoading}
+                    className="border border-black bg-green-500 text-white px-6 py-2 text-sm font-bold uppercase hover:bg-green-600 disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {imageCaptchaLoading ? (
+                      <>
+                        <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        Verifying...
+                      </>
+                    ) : (
+                      "Verify"
+                    )}
+                  </button>
+                </div>
+                {imageCaptchaLoading && (
+                  <div className="text-center text-sm text-gray-600 mt-2">
+                    Checking your selections...
+                  </div>
+                )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {captchaStage === "rps" && (
+              <div className="space-y-4 relative">
+                {showConfetti && (
+                  <div className="confetti-container">
+                    {Array.from({ length: 50 }).map((_, i) => {
+                      const startLeft = Math.random() * 100;
+                      const drift = (Math.random() - 0.5) * 200; // Random horizontal drift
+                      const duration = 2 + Math.random() * 2; // 2-4 seconds
+                      const delay = Math.random() * 0.3; // Stagger the start
+                      const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ff8800', '#8800ff'];
+                      
+                      return (
+                        <div 
+                          key={i} 
+                          className="confetti" 
+                          style={{
+                            '--start-left': `${startLeft}%`,
+                            '--drift': `${drift}px`,
+                            '--duration': `${duration}s`,
+                            animationDelay: `${delay}s`,
+                            backgroundColor: colors[Math.floor(Math.random() * colors.length)],
+                            width: `${8 + Math.random() * 6}px`,
+                            height: `${8 + Math.random() * 6}px`,
+                          } as React.CSSProperties}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="bg-yellow-50 border-2 border-yellow-300 p-3">
+                  <p className="font-semibold text-sm mb-1">Beat the bot in Rock Paper Scissors</p>
+                  <p className="text-xs text-gray-600">Win 3 rounds to complete verification</p>
+                </div>
+                <div className="space-y-3">
+                  <div className="text-center">
+                    <p className="font-semibold text-lg mb-2">Wins: {rpsWins} / 3</p>
+                    {rpsResult && (
+                      <p className={`font-bold text-lg animate-pulse ${
+                        rpsResult.includes("win") ? "text-green-600" : 
+                        rpsResult.includes("lose") ? "text-red-600" : 
+                        "text-yellow-600"
+                      }`}>
+                        {rpsResult}
+                      </p>
+                    )}
+                  </div>
+                  
+                  {/* Choices display */}
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="text-center">
+                      <p className="text-xs font-semibold mb-2">You</p>
+                      <div className={`rps-choice-display ${rpsPlayerChoice ? 'reveal' : ''} ${rpsResult.includes("win") && rpsPlayerChoice ? 'winner' : ''}`}>
+                        {rpsPlayerChoice ? (
+                          <span className="text-4xl">
+                            {rpsPlayerChoice === "rock" ? "🪨" : rpsPlayerChoice === "paper" ? "📄" : "✂️"}
+                          </span>
+                        ) : (
+                          <span className="text-2xl text-gray-400">?</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs font-semibold mb-2">Bot</p>
+                      <div className={`rps-choice-display ${botChoiceRevealed ? 'reveal' : ''} ${rpsResult.includes("lose") && botChoiceRevealed ? 'bot-winner' : ''}`}>
+                        {botChoiceRevealed && rpsBotChoice ? (
+                          <span className="text-4xl">
+                            {rpsBotChoice === "rock" ? "🪨" : rpsBotChoice === "paper" ? "📄" : "✂️"}
+                          </span>
+                        ) : (
+                          <span className="text-2xl text-gray-400">?</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      type="button"
+                      onClick={() => handleRPSChoice("rock")}
+                      disabled={!!rpsPlayerChoice || rpsAnimating}
+                      className={`rps-button ${rpsPlayerChoice === "rock" ? "selected" : ""} border-2 border-black bg-yellow-50 px-4 py-3 text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-yellow-100 active:scale-95 transition-all`}
+                    >
+                      🪨 Rock
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRPSChoice("paper")}
+                      disabled={!!rpsPlayerChoice || rpsAnimating}
+                      className={`rps-button ${rpsPlayerChoice === "paper" ? "selected" : ""} border-2 border-black bg-yellow-50 px-4 py-3 text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-yellow-100 active:scale-95 transition-all`}
+                    >
+                      📄 Paper
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRPSChoice("scissors")}
+                      disabled={!!rpsPlayerChoice || rpsAnimating}
+                      className={`rps-button ${rpsPlayerChoice === "scissors" ? "selected" : ""} border-2 border-black bg-yellow-50 px-4 py-3 text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-yellow-100 active:scale-95 transition-all`}
+                    >
+                      ✂️ Scissors
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {captchaStage === "complete" && (
+              <div className="text-center py-8">
+                <div className="text-green-600 text-4xl mb-4">✓</div>
+                <p className="text-xl font-bold text-green-600 mb-2">Verification Successful!</p>
+                <p className="text-sm text-gray-600">You may now submit the form.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
