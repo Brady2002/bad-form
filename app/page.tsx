@@ -1,6 +1,7 @@
  "use client";
 
-import { useState, useRef, useEffect, ChangeEvent } from "react";
+import { useState, useRef, useEffect, ChangeEvent, useCallback } from "react";
+import { GoogleMap, LoadScript, Marker } from "@react-google-maps/api";
 
 const SIREN_URL =
   "https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg";
@@ -79,6 +80,15 @@ export default function Home() {
   const sirenAudioRef = useRef<HTMLAudioElement | null>(null);
   const isEmailAlertActive =
     email.length > 0 && confirmEmail.length > 0 && email !== confirmEmail;
+
+  // Address/Google Maps state
+  const [addressPin, setAddressPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [address, setAddress] = useState<string>("");
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [isAddressValid, setIsAddressValid] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
 
   // RPS sound refs
   const winSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -208,6 +218,73 @@ export default function Home() {
   const handleConfirmEmailChange = (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     setConfirmEmail(value);
+  };
+
+  // Reverse geocode coordinates to get address
+  const reverseGeocode = useCallback((lat: number, lng: number) => {
+    if (!geocoderRef.current) {
+      geocoderRef.current = new google.maps.Geocoder();
+    }
+    
+    setAddressLoading(true);
+    setIsAddressValid(false);
+    geocoderRef.current.geocode(
+      { location: { lat, lng } },
+      (results, status) => {
+        setAddressLoading(false);
+        if (status === "OK" && results && results[0]) {
+          const result = results[0];
+          setAddress(result.formatted_address);
+          
+          // Check if address is in North Carolina, United States
+          const addressComponents = result.address_components || [];
+          const stateComponent = addressComponents.find(
+            (component) => component.types.includes("administrative_area_level_1")
+          );
+          const countryComponent = addressComponents.find(
+            (component) => component.types.includes("country")
+          );
+          
+          const isInNorthCarolina = 
+            stateComponent &&
+            (stateComponent.long_name === "North Carolina" || 
+             stateComponent.short_name === "NC") &&
+            countryComponent &&
+            countryComponent.short_name === "US";
+          
+          setIsAddressValid(isInNorthCarolina || false);
+        } else {
+          setAddress("Address not found");
+          setIsAddressValid(false);
+        }
+      }
+    );
+  }, []);
+
+  // Google Maps handlers
+  const onMapLoad = useCallback((map: google.maps.Map) => {
+    mapRef.current = map;
+    setMapLoaded(true);
+    geocoderRef.current = new google.maps.Geocoder();
+  }, []);
+
+  const onMapClick = useCallback((e: google.maps.MapMouseEvent) => {
+    if (e.latLng) {
+      const lat = e.latLng.lat();
+      const lng = e.latLng.lng();
+      setAddressPin({ lat, lng });
+      reverseGeocode(lat, lng);
+    }
+  }, [reverseGeocode]);
+
+  const mapContainerStyle = {
+    width: "100%",
+    height: "400px",
+  };
+
+  const defaultCenter = {
+    lat: -33.8688,
+    lng: 151.2093, // Sydney, Australia default
   };
 
   // Captcha handlers
@@ -431,6 +508,14 @@ export default function Home() {
               alert("Please complete the verification challenge first.");
               return;
             }
+            if (!addressPin) {
+              alert("Please place a pin on the map to indicate your address.");
+              return;
+            }
+            if (!isAddressValid) {
+              alert("Address must be in North Carolina, United States to submit this form.");
+              return;
+            }
             alert(
               "Thank you for submitting absolutely nothing of value.\n\n(Also, none of this was saved.)"
             );
@@ -547,6 +632,92 @@ export default function Home() {
                   onChange={handleDobColorChange}
                   className="h-10 w-14 border border-zinc-800 cursor-crosshair"
                 />
+              </div>
+            </div>
+          </section>
+
+          {/* Address section with Google Maps */}
+          <section className="grid sm:grid-cols-[2fr,3fr] gap-4 border-b border-black pb-5">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] uppercase tracking-[0.3em]">
+                Address
+              </label>
+              <label className="font-semibold">
+                Address (Pin Placement Required)
+              </label>
+              <p className="text-[11px] text-zinc-700">
+                Click on the map to place a pin at your address location.
+              </p>
+              {addressLoading && (
+                <p className="text-[10px] text-blue-600 mt-2 italic">
+                  Loading address...
+                </p>
+              )}
+              {address && !addressLoading && (
+                <>
+                  <p className="text-[10px] mt-2">
+                    Address: {address}
+                  </p>
+                  {isAddressValid ? (
+                    <p className="text-[10px] text-green-700 mt-1 font-semibold">
+                      ✓ Valid address
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-red-700 mt-1 font-semibold">
+                      ✗ Address must be in North Carolina, United States
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="border border-zinc-500 bg-yellow-50 overflow-hidden">
+                {process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? (
+                  <LoadScript
+                    googleMapsApiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+                    loadingElement={<div className="w-full h-[400px] bg-gray-200 flex items-center justify-center">Loading map...</div>}
+                  >
+                    <GoogleMap
+                      mapContainerStyle={mapContainerStyle}
+                      center={addressPin || defaultCenter}
+                      zoom={addressPin ? 15 : 10}
+                      onLoad={onMapLoad}
+                      onClick={onMapClick}
+                      options={{
+                        disableDefaultUI: false,
+                        zoomControl: true,
+                        streetViewControl: false,
+                        mapTypeControl: false,
+                        fullscreenControl: true,
+                      }}
+                    >
+                      {addressPin && (
+                        <Marker
+                          position={addressPin}
+                          draggable={true}
+                          onDragEnd={(e) => {
+                            if (e.latLng) {
+                              const lat = e.latLng.lat();
+                              const lng = e.latLng.lng();
+                              setAddressPin({ lat, lng });
+                              reverseGeocode(lat, lng);
+                            }
+                          }}
+                        />
+                      )}
+                    </GoogleMap>
+                  </LoadScript>
+                ) : (
+                  <div className="w-full h-[400px] bg-gray-200 flex flex-col items-center justify-center p-4 text-center">
+                    <p className="text-sm font-semibold text-red-600 mb-2">Google Maps API Key Required</p>
+                    <p className="text-xs text-gray-600">
+                      Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in your .env.local file
+                    </p>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Get your API key from: https://console.cloud.google.com/google/maps-apis
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </section>
