@@ -689,6 +689,14 @@ export default function Home() {
                         streetViewControl: false,
                         mapTypeControl: false,
                         fullscreenControl: true,
+                        mapTypeId: "satellite" as google.maps.MapTypeId,
+                        styles: [
+                          {
+                            featureType: "all",
+                            elementType: "labels",
+                            stylers: [{ visibility: "off" }],
+                          },
+                        ],
                       }}
                     >
                       {addressPin && (
