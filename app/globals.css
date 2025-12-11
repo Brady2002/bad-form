@@ -146,3 +146,26 @@ body {
   --delay: 0s;
   --start-left: 50%;
 }
+
+/* Dice Drag and Drop Animations */
+@keyframes dice-slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--slide-distance, 0));
+  }
+}
+
+.dice-drag-over {
+  animation: dice-pulse 0.3s ease-in-out;
+}
+
+@keyframes dice-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}

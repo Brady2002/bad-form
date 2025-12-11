@@ -115,6 +115,14 @@ export default function Home() {
   const [rpsResult, setRpsResult] = useState<string>("");
   const [rpsWins, setRpsWins] = useState(0);
 
+  // Phone number dice game state
+  const [diceValues, setDiceValues] = useState<number[]>(Array.from({ length: 10 }, () => 0));
+  const [heldDice, setHeldDice] = useState<boolean[]>([false, false, false, false, false, false, false, false, false, false]);
+  const [diceRolling, setDiceRolling] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [diceInitialized, setDiceInitialized] = useState(false);
+
   const handleDobColorChange = (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     setDobColor(value);
@@ -484,6 +492,100 @@ export default function Home() {
     }
   }, [captchaStage]);
 
+  // Initialize dice values only on client side to avoid hydration mismatch
+  useEffect(() => {
+    if (!diceInitialized) {
+      setDiceValues(Array.from({ length: 10 }, () => Math.floor(Math.random() * 10)));
+      setDiceInitialized(true);
+    }
+  }, [diceInitialized]);
+
+  // Phone number dice game functions
+  const rollDice = () => {
+    if (diceRolling) return;
+    
+    setDiceRolling(true);
+    
+    // Animate dice rolling
+    const rollAnimation = setInterval(() => {
+      setDiceValues(prev => prev.map((val, idx) => 
+        heldDice[idx] ? val : Math.floor(Math.random() * 10)
+      ));
+    }, 100);
+    
+    // Stop rolling after animation
+    setTimeout(() => {
+      clearInterval(rollAnimation);
+      setDiceValues(prev => prev.map((val, idx) => 
+        heldDice[idx] ? val : Math.floor(Math.random() * 10)
+      ));
+      setDiceRolling(false);
+    }, 800);
+  };
+
+  const toggleHold = (index: number) => {
+    if (diceRolling) return;
+    setHeldDice(prev => {
+      const newHeld = [...prev];
+      newHeld[index] = !newHeld[index];
+      return newHeld;
+    });
+  };
+
+  const handleDragStart = (index: number) => {
+    if (diceRolling) return;
+    setDraggedIndex(index);
+  };
+
+  const handleDragEnter = (index: number) => {
+    if (draggedIndex !== null && draggedIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex !== null && draggedIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+    if (draggedIndex === null || draggedIndex === dropIndex || diceRolling) {
+      setDraggedIndex(null);
+      return;
+    }
+
+    // Swap dice values and held states
+    const newDiceValues = [...diceValues];
+    const newHeldDice = [...heldDice];
+    
+    // Swap the values
+    const tempValue = newDiceValues[draggedIndex];
+    const tempHeld = newHeldDice[draggedIndex];
+    
+    newDiceValues[draggedIndex] = newDiceValues[dropIndex];
+    newDiceValues[dropIndex] = tempValue;
+    
+    newHeldDice[draggedIndex] = newHeldDice[dropIndex];
+    newHeldDice[dropIndex] = tempHeld;
+    
+    setDiceValues(newDiceValues);
+    setHeldDice(newHeldDice);
+    setDraggedIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   return (
     <div
       className={`min-h-screen w-full bg-[#fffbf0] text-zinc-900 flex items-stretch justify-center ${
@@ -524,9 +626,6 @@ export default function Home() {
           {/* Name section */}
           <section className="grid sm:grid-cols-[2fr,3fr] gap-4 items-stretch border-b border-black pb-5">
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase tracking-[0.3em]">
-                Name
-              </label>
               <label htmlFor="name" className="font-semibold">
                 Name
               </label>
@@ -549,7 +648,7 @@ export default function Home() {
           {/* Email section */}
           <section className="grid sm:grid-cols-[2fr,3fr] gap-4 border-b border-black pb-5">
             <div className="flex flex-col gap-1 order-2 sm:order-1">
-              <label className="text-[10px] uppercase tracking-[0.3em]">
+              <label className="font-semibold" htmlFor="dob-r">
                 Email
               </label>
               <p className="text-[11px] text-zinc-700">
@@ -597,9 +696,6 @@ export default function Home() {
           {/* RGB Date-of-birth */}
           <section className="grid sm:grid-cols-[2fr,3fr] gap-4 border-b border-black pb-5">
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase tracking-[0.3em]">
-                Date of Birth
-              </label>
               <label className="font-semibold" htmlFor="dob-r">
                 Date of Birth (RGB format only)
               </label>
@@ -639,9 +735,6 @@ export default function Home() {
           {/* Address section with Google Maps */}
           <section className="grid sm:grid-cols-[2fr,3fr] gap-4 border-b border-black pb-5">
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase tracking-[0.3em]">
-                Address
-              </label>
               <label className="font-semibold">
                 Address (Pin Placement Required)
               </label>
@@ -730,12 +823,96 @@ export default function Home() {
             </div>
           </section>
 
+          {/* Phone Number Dice Game Section */}
+          <section className="grid sm:grid-cols-[2fr,3fr] gap-4 border-b border-black pb-5">
+            <div className="flex flex-col gap-1">
+              <label className="font-semibold">
+                Phone Number (Dice Roll Required)
+              </label>
+              <p className="text-[11px] text-zinc-700">
+                Roll 10 dice to get your phone number. Hold dice you want to keep, drag to rearrange, and re-roll the rest until you have your number.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              {/* Dice Display */}
+              <div className="border border-zinc-500 bg-yellow-50 p-4">
+                <p className="text-[10px] text-zinc-600 mb-2 italic">
+                  Drag dice to rearrange • Click to hold/unhold
+                </p>
+                <div className="grid grid-cols-10 gap-2 mb-3 transition-all duration-300">
+                  {diceValues.map((value, index) => {
+                    const isDragging = draggedIndex === index;
+                    const isDragOver = dragOverIndex === index;
+                    const isDraggingOther = draggedIndex !== null && draggedIndex !== index;
+                    
+                    return (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => toggleHold(index)}
+                        disabled={diceRolling}
+                        draggable={!diceRolling}
+                        onDragStart={() => handleDragStart(index)}
+                        onDragEnter={() => handleDragEnter(index)}
+                        onDragLeave={handleDragLeave}
+                        onDragOver={(e) => handleDragOver(e, index)}
+                        onDrop={(e) => handleDrop(e, index)}
+                        onDragEnd={handleDragEnd}
+                        className={`
+                          aspect-square border-2 font-bold text-lg relative flex flex-col items-center justify-center
+                          transition-all duration-300 ease-in-out
+                          ${heldDice[index] 
+                            ? "bg-blue-500 border-blue-700 text-white shadow-inner" 
+                            : "bg-white border-zinc-400 text-zinc-900"
+                          }
+                          ${diceRolling && !heldDice[index] ? "animate-pulse" : ""}
+                          ${isDragging ? "opacity-40 scale-90 rotate-6 z-50 shadow-xl cursor-grabbing" : ""}
+                          ${isDragOver && isDraggingOther ? "border-blue-500 border-dashed border-4 bg-blue-100 scale-115 z-40 dice-drag-over" : ""}
+                          ${isDraggingOther && !isDragOver ? "hover:border-blue-300 hover:bg-blue-50 transition-all duration-150" : ""}
+                          ${!isDragging && !isDragOver && !diceRolling ? "hover:border-zinc-600 hover:scale-105 hover:shadow-md" : ""}
+                          disabled:opacity-50 disabled:cursor-not-allowed
+                          active:scale-95
+                          cursor-move
+                        `}
+                        title={heldDice[index] ? "Click to unhold • Drag to rearrange" : "Click to hold • Drag to rearrange"}
+                      >
+                        {heldDice[index] && (
+                          <div className="text-[10px] absolute top-0.5">🔒</div>
+                        )}
+                        <div className={heldDice[index] ? "text-white text-xl" : "text-zinc-900 text-xl"}>
+                          {value}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                
+                {/* Roll and Reset Buttons */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={rollDice}
+                    disabled={diceRolling}
+                    className="flex-1 border-2 border-black bg-[#6890d0] px-4 py-2 text-sm font-bold uppercase hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                  >
+                    {diceRolling ? "Rolling..." : "Roll Dice"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHeldDice([false, false, false, false, false, false, false, false, false, false])}
+                    disabled={diceRolling}
+                    className="border-2 border-black bg-yellow-200 px-4 py-2 text-sm font-bold uppercase hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                  >
+                    Reset All
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
           {/* Captcha Section */}
           <section className="grid sm:grid-cols-[2fr,3fr] gap-4 border-b border-black pb-5">
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase tracking-[0.3em]">
-                Verification
-              </label>
               <label className="font-semibold">
                 Security Verification
               </label>
@@ -995,3 +1172,4 @@ export default function Home() {
     </div>
   );
 }
+
