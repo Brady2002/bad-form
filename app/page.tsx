@@ -1149,7 +1149,7 @@ export default function Home() {
               <div className="mt-2 p-2 bg-yellow-100 border border-yellow-300 rounded">
                 <p className="text-[10px] font-semibold text-zinc-800 mb-1">Your Name:</p>
                 <p className="text-sm font-bold text-zinc-900 min-h-[20px]">
-                  {getConstructedName() || <span className="text-zinc-400 italic">Drag tiles to board to build your name...</span>}
+                  {getConstructedName()}
                 </p>
               </div>
             </div>
