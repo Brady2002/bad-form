@@ -16,8 +16,6 @@ const CLICK_SOUND = "/rps/click.mp3";
 type CaptchaStage = "hidden" | "images" | "rps" | "complete";
 
 // Image captcha data - using local images
-// Fire hydrants (correct): IDs 1, 3, 5, 7, 9
-// Other images (incorrect): IDs 2, 4, 6, 8
 const CAPTCHA_IMAGES = [
   { 
     id: 1, 
@@ -74,12 +72,13 @@ export default function Home() {
   const [dobR, setDobR] = useState(18); // decoded "day"
   const [dobG, setDobG] = useState(9); // decoded "month"
   const [dobB, setDobB] = useState(1945); // decoded "year" (full 4-digit)
+  const [isAgeValid, setIsAgeValid] = useState(true);
 
   const [email, setEmail] = useState("");
   const [confirmEmail, setConfirmEmail] = useState("");
   const sirenAudioRef = useRef<HTMLAudioElement | null>(null);
   const isEmailAlertActive =
-    email.length > 0 && confirmEmail.length > 0 && email !== confirmEmail;
+    email.length > 0 && email !== confirmEmail;
 
   // Address/Google Maps state
   const [addressPin, setAddressPin] = useState<{ lat: number; lng: number } | null>(null);
@@ -141,7 +140,30 @@ export default function Home() {
     const month = Math.min(12, Math.max(1, Math.round(g / 16) || 1));
     // Map B (0-255) to full year range 1900-2025
     const yearRange = 2025 - 1900; // 125 years
-    const year = Math.min(2025, Math.max(1900, Math.round(1900 + (b / 255) * yearRange)));
+    let year = Math.min(2025, Math.max(1900, Math.round(1900 + (b / 255) * yearRange)));
+
+    // Calculate maximum allowed year (must be 18+ years old)
+    const today = new Date();
+    const maxAllowedYear = today.getFullYear() - 18;
+    
+    // Check if the date would result in age < 18
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const validDay = Math.min(day, daysInMonth);
+    const birthDate = new Date(year, month - 1, validDay);
+    
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    
+    // If age is less than 18, clamp the year to maximum allowed
+    if (age < 18) {
+      year = maxAllowedYear;
+      setIsAgeValid(false);
+    } else {
+      setIsAgeValid(true);
+    }
 
     setDobR(day);
     setDobG(month);
@@ -618,6 +640,11 @@ export default function Home() {
               alert("Address must be in North Carolina, United States to submit this form.");
               return;
             }
+            const age = calculateAge();
+            if (age < 18) {
+              alert("You must be 18 years or older to submit this form.");
+              return;
+            }
             alert(
               "Thank you for submitting absolutely nothing of value.\n\n(Also, none of this was saved.)"
             );
@@ -703,7 +730,7 @@ export default function Home() {
                 <span className="font-semibold">R</span> is your day,
                 <span className="font-semibold"> G</span> is your month, and
                 <span className="font-semibold"> B</span> is your birth year
-                (1900-2025).
+                (1900-2025). Must be 18 years or older.
               </p>
             </div>
             <div className="flex flex-col gap-2">
@@ -719,6 +746,11 @@ export default function Home() {
                   <p className="text-sm font-semibold text-zinc-900">
                     {calculateAge()} years old
                 </p>
+                {!isAgeValid && (
+                  <p className="text-[10px] font-semibold text-red-800 mt-1">
+                    Must be 18 years or older
+                  </p>
+                )}
               <div className="flex items-center gap-2">
                 <input
                   id="dob-color"
