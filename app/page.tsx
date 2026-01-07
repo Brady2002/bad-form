@@ -98,6 +98,10 @@ export default function Home() {
   const paperSoundRef = useRef<HTMLAudioElement | null>(null);
   const scissorsSoundRef = useRef<HTMLAudioElement | null>(null);
 
+  // Tile sound refs
+  const grabTileSoundRef = useRef<HTMLAudioElement | null>(null);
+  const placeTileSoundRef = useRef<HTMLAudioElement | null>(null);
+
   // RPS animation states
   const [rpsAnimating, setRpsAnimating] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -121,6 +125,489 @@ export default function Home() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [diceInitialized, setDiceInitialized] = useState(false);
+
+  // Scrabble tile name field state
+  type Tile = {
+    id: string;
+    letter: string;
+    x: number;
+    y: number;
+    rotation: number;
+    zIndex: number;
+    isSelected: boolean;
+    onBoard: boolean;
+    boardRow: number | null; // Row on the board (0 = first name, 1 = last name)
+    boardCol: number | null; // Column on the board (0-based index)
+  };
+  const [tiles, setTiles] = useState<Tile[]>([]);
+  const [boardTiles, setBoardTiles] = useState<(Tile | null)[][]>([
+    Array(10).fill(null), // First name row (10 slots)
+    Array(10).fill(null), // Last name row (10 slots)
+  ]);
+  const [draggedTileId, setDraggedTileId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
+  const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
+  const [hasDragged, setHasDragged] = useState(false);
+  const [maxZIndex, setMaxZIndex] = useState(100);
+  const [dragOverBoardSlot, setDragOverBoardSlot] = useState<number | null>(null);
+  const [rotationError, setRotationError] = useState(false);
+  const tilesInitialized = useRef(false);
+  const isDraggingRef = useRef(false);
+  const hasDraggedRef = useRef(false);
+  
+  // Initialize scrabble tiles
+  useEffect(() => {
+    if (tilesInitialized.current) return;
+    tilesInitialized.current = true;
+
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
+    const newTiles: Tile[] = [];
+    let tileId = 0;
+
+    // Create 5 of each letter
+    for (let i = 0; i < 5; i++) {
+      for (const letter of letters) {
+        newTiles.push({
+          id: `tile-${tileId++}`,
+          letter,
+          x: Math.random() * 600 + 80, // Random position in pile area
+          y: Math.random() * 200 + 20,
+          rotation: (Math.random()) * 90, // Random rotation
+          zIndex: Math.floor(Math.random() * 50), // Random initial z-index
+          isSelected: false,
+          onBoard: false,
+          boardRow: null,
+          boardCol: null,
+        });
+      }
+    }
+
+    // Shuffle tiles
+    for (let i = newTiles.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [newTiles[i], newTiles[j]] = [newTiles[j], newTiles[i]];
+    }
+
+    setTiles(newTiles);
+    setMaxZIndex(100);
+  }, []);
+
+  // Handle tile click - bring to front
+  const handleTileClick = (tileId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Only bring to front if user didn't drag
+    if (!isDraggingRef.current) {
+      setTiles(prev => prev.map(tile => 
+        tile.id === tileId 
+          ? { ...tile, zIndex: maxZIndex + 1 }
+          : tile
+      ));
+      setMaxZIndex(prev => prev + 1);
+    }
+  };
+
+  // Handle tile drag start
+  const handleTileDragStart = (tileId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault(); // Prevent text selection
+    const tile = tiles.find(t => t.id === tileId);
+    if (!tile) return;
+
+    isDraggingRef.current = false;
+    hasDraggedRef.current = false;
+    setDraggedTileId(tileId);
+    setHasDragged(false);
+    setDragStartPos({ x: e.clientX, y: e.clientY });
+    
+    if (tile.onBoard) {
+      // For board tiles, use screen coordinates
+      const tileElement = e.currentTarget as HTMLElement;
+      const tileRect = tileElement.getBoundingClientRect();
+      setDragOffset({
+        x: e.clientX - tileRect.left - tileRect.width / 2,
+        y: e.clientY - tileRect.top - tileRect.height / 2,
+      });
+      // Set initial position to current mouse position
+      setTiles(prev => prev.map(t => 
+        t.id === tileId 
+          ? { ...t, x: e.clientX, y: e.clientY }
+          : t
+      ));
+    } else {
+      // For pile tiles, use container-relative coordinates
+      const container = (e.currentTarget as HTMLElement).closest('.tile-container') as HTMLElement;
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        setDragOffset({
+          x: e.clientX - containerRect.left - tile.x,
+          y: e.clientY - containerRect.top - tile.y,
+        });
+      }
+    }
+
+    // Play grab tile sound
+    playSound(grabTileSoundRef, "/name/grabTile.mp3");
+
+    // Bring to front when dragging starts
+    setTiles(prev => prev.map(t => 
+      t.id === tileId 
+        ? { ...t, zIndex: maxZIndex + 1 }
+        : t
+    ));
+    setMaxZIndex(prev => prev + 1);
+  };
+
+  // Handle tile drag
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!draggedTileId || !dragOffset || !dragStartPos) return;
+
+      const tile = tiles.find(t => t.id === draggedTileId);
+      if (!tile) return;
+
+      // Check if user has actually dragged (moved more than 5 pixels)
+      const dragDistance = Math.sqrt(
+        Math.pow(e.clientX - dragStartPos.x, 2) + 
+        Math.pow(e.clientY - dragStartPos.y, 2)
+      );
+      if (dragDistance > 5) {
+        isDraggingRef.current = true;
+        hasDraggedRef.current = true;
+        setHasDragged(true);
+      }
+
+      // Check if we're over a board slot (for visual feedback)
+      if (!tile.onBoard) {
+        const boardSlots = document.querySelectorAll('[data-board-slot]');
+        let overSlot = false;
+        let slotIndex = -1;
+        
+        boardSlots.forEach((slot) => {
+          const rect = slot.getBoundingClientRect();
+          const row = parseInt(slot.getAttribute('data-board-row') || '-1');
+          const col = parseInt(slot.getAttribute('data-board-col') || '-1');
+          if (
+            e.clientX >= rect.left &&
+            e.clientX <= rect.right &&
+            e.clientY >= rect.top &&
+            e.clientY <= rect.bottom &&
+            row >= 0 &&
+            col >= 0
+          ) {
+            overSlot = true;
+            slotIndex = row * 10 + col;
+          }
+        });
+        
+        if (overSlot && slotIndex >= 0) {
+          setDragOverBoardSlot(slotIndex);
+        } else {
+          setDragOverBoardSlot(null);
+        }
+      }
+
+      // Update tile position during drag (for both pile and board tiles)
+      // For board tiles, we'll use screen coordinates; for pile tiles, container-relative
+      if (tile.onBoard) {
+        // For board tiles, use screen coordinates for visual dragging
+        const newX = e.clientX;
+        const newY = e.clientY;
+        
+        setTiles(prev => prev.map(t => 
+          t.id === draggedTileId
+            ? { 
+                ...t, 
+                x: newX, 
+                y: newY
+              }
+            : t
+        ));
+      } else {
+        // For tiles in pile, update position relative to container
+        const container = document.querySelector('.tile-container') as HTMLElement;
+        if (!container) return;
+
+        const containerRect = container.getBoundingClientRect();
+        const newX = e.clientX - containerRect.left - (dragOffset?.x || 0);
+        const newY = e.clientY - containerRect.top - (dragOffset?.y || 0);
+
+        // Allow tile to move freely during drag (no constraints)
+        setTiles(prev => prev.map(t => 
+          t.id === draggedTileId
+            ? { 
+                ...t, 
+                x: newX, 
+                y: newY
+              }
+            : t
+        ));
+      }
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!draggedTileId) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const tile = tiles.find(t => t.id === draggedTileId);
+      // Only rotate tiles that are not on the board
+      if (tile && tile.onBoard) return;
+
+      // Rotate tile based on scroll direction
+      const rotationDelta = e.deltaY > 0 ? -5 : 5; // Scroll down = rotate left, scroll up = rotate right
+      
+      setTiles(prev => prev.map(t => 
+        t.id === draggedTileId
+          ? { ...t, rotation: t.rotation + rotationDelta }
+          : t
+      ));
+    };
+
+    const handleMouseUp = (e?: MouseEvent) => {
+      if (!draggedTileId || !e) return;
+      
+      const tile = tiles.find(t => t.id === draggedTileId);
+      if (!tile) return;
+
+      // Check if we're over a board slot
+      const boardSlots = document.querySelectorAll('[data-board-slot]');
+      let droppedOnBoard = false;
+      let boardRow = -1;
+      let boardCol = -1;
+
+      boardSlots.forEach((slot) => {
+        const rect = slot.getBoundingClientRect();
+        const row = parseInt(slot.getAttribute('data-board-row') || '-1');
+        const col = parseInt(slot.getAttribute('data-board-col') || '-1');
+        if (
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom &&
+          row >= 0 &&
+          col >= 0
+        ) {
+          droppedOnBoard = true;
+          boardRow = row;
+          boardCol = col;
+        }
+      });
+
+      if (droppedOnBoard && boardRow >= 0 && boardCol >= 0) {
+        if (!tile.onBoard) {
+          // Dropping tile from pile onto board
+          handleBoardDrop(boardRow, boardCol);
+        } else if (tile.onBoard && (boardRow !== tile.boardRow || boardCol !== tile.boardCol)) {
+          // Moving board tile to different slot
+          handleBoardDrop(boardRow, boardCol);
+        }
+        // If dropped on same slot, do nothing (tile stays in place)
+      } else if (tile.onBoard && hasDraggedRef.current) {
+        // Check if dropped in pile area (removing from board)
+        const container = document.querySelector('.tile-container') as HTMLElement;
+        if (container) {
+          const containerRect = container.getBoundingClientRect();
+          const isInPileArea = 
+            e.clientX >= containerRect.left &&
+            e.clientX <= containerRect.right &&
+            e.clientY >= containerRect.top &&
+            e.clientY <= containerRect.bottom;
+          
+          if (isInPileArea) {
+            // Remove from board and return to pile
+            handleRemoveFromBoard(tile.id);
+          }
+        }
+      } else if (!tile.onBoard && !droppedOnBoard && hasDraggedRef.current) {
+        // Tile dropped back in pile area - constrain to pile bounds
+        const container = document.querySelector('.tile-container') as HTMLElement;
+        if (container) {
+          const containerRect = container.getBoundingClientRect();
+          const isInPileArea = 
+            e.clientX >= containerRect.left &&
+            e.clientX <= containerRect.right &&
+            e.clientY >= containerRect.top &&
+            e.clientY <= containerRect.bottom;
+          
+          if (isInPileArea) {
+            // Constrain tile to pile bounds
+            const constrainedX = Math.max(0, Math.min(tile.x, containerRect.width - 50));
+            const constrainedY = Math.max(0, Math.min(tile.y, containerRect.height - 50));
+            
+            setTiles(prev => prev.map(t => 
+              t.id === draggedTileId
+                ? { ...t, x: constrainedX, y: constrainedY }
+                : t
+            ));
+          } else {
+            // Tile dropped outside pile - keep it at current position (it will be visible)
+            // Or we could snap it back to a random position in the pile
+            const container = document.querySelector('.tile-container') as HTMLElement;
+            if (container) {
+              const containerRect = container.getBoundingClientRect();
+              setTiles(prev => prev.map(t => 
+                t.id === draggedTileId
+                  ? { 
+                      ...t, 
+                      x: Math.random() * (containerRect.width - 50),
+                      y: Math.random() * (containerRect.height - 50)
+                    }
+                  : t
+              ));
+            }
+          }
+        }
+      }
+      
+      // Play place tile sound if tile was actually dragged
+      if (hasDraggedRef.current) {
+        playSound(placeTileSoundRef, "/name/placeTile.mp3");
+      }
+      
+      // Reset after a short delay to allow click handler to check hasDragged
+      setTimeout(() => {
+        isDraggingRef.current = false;
+        hasDraggedRef.current = false;
+        setDraggedTileId(null);
+        setDragOffset(null);
+        setDragStartPos(null);
+        setHasDragged(false);
+        setDragOverBoardSlot(null);
+      }, 50);
+    };
+
+    const handleMouseUpWrapper = (e: MouseEvent) => handleMouseUp(e);
+
+    if (draggedTileId) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUpWrapper);
+      document.addEventListener('wheel', handleWheel, { passive: false });
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUpWrapper);
+      document.removeEventListener('wheel', handleWheel);
+    };
+  }, [draggedTileId, dragOffset, dragStartPos, tiles]);
+
+  // Prevent text selection during drag
+  useEffect(() => {
+    if (draggedTileId) {
+      // Add class to body to prevent text selection
+      document.body.style.userSelect = 'none';
+      (document.body.style as any).webkitUserSelect = 'none';
+      (document.body.style as any).mozUserSelect = 'none';
+      (document.body.style as any).msUserSelect = 'none';
+      
+      return () => {
+        // Restore text selection when drag ends
+        document.body.style.userSelect = '';
+        (document.body.style as any).webkitUserSelect = '';
+        (document.body.style as any).mozUserSelect = '';
+        (document.body.style as any).msUserSelect = '';
+      };
+    }
+  }, [draggedTileId]);
+
+  // Handle dropping tile on board
+  const handleBoardDrop = (row: number, col: number) => {
+    if (!draggedTileId) return;
+    
+    const tile = tiles.find(t => t.id === draggedTileId);
+    if (!tile) return;
+
+    // Check if tile is rotated correctly (within 10 degrees of 0, except blank tiles)
+    const normalizedRotation = ((tile.rotation % 360) + 360) % 360;
+    const isCorrectRotation = tile.letter === ' ' || 
+      (normalizedRotation <= 10 || normalizedRotation >= 350);
+
+    if (!isCorrectRotation) {
+      // Tile not rotated correctly, show error and don't place it
+      setRotationError(true);
+      setTimeout(() => setRotationError(false), 2000);
+      return;
+    }
+
+    // Remove tile from old board position if it was on board
+    if (tile.onBoard && tile.boardRow !== null && tile.boardCol !== null) {
+      setBoardTiles(prev => {
+        const newBoard = prev.map(r => [...r]);
+        newBoard[tile.boardRow!][tile.boardCol!] = null;
+        return newBoard;
+      });
+    }
+
+    // Place tile on board
+    setBoardTiles(prev => {
+      const newBoard = prev.map(r => [...r]);
+      // If slot is occupied, don't place
+      if (newBoard[row][col] !== null) {
+        return prev; // Don't replace existing tile
+      }
+      newBoard[row][col] = { ...tile, onBoard: true, boardRow: row, boardCol: col, rotation: 0 };
+      return newBoard;
+    });
+
+    // Update tile state
+    setTiles(prev => prev.map(t => 
+      t.id === draggedTileId
+        ? { ...t, onBoard: true, boardRow: row, boardCol: col, rotation: 0 }
+        : t
+    ));
+  };
+
+  // Handle removing tile from board (drag back to pile)
+  const handleRemoveFromBoard = (tileId: string) => {
+    const tile = tiles.find(t => t.id === tileId);
+    if (!tile || !tile.onBoard) return;
+
+    setBoardTiles(prev => {
+      const newBoard = prev.map(r => [...r]);
+      if (tile.boardRow !== null && tile.boardCol !== null) {
+        newBoard[tile.boardRow][tile.boardCol] = null;
+      }
+      return newBoard;
+    });
+
+    // Return tile to pile with random position
+    setTiles(prev => prev.map(t => 
+      t.id === tileId
+        ? { 
+            ...t, 
+            onBoard: false, 
+            boardRow: null,
+            boardCol: null,
+            x: Math.random() * 600 + 50,
+            y: Math.random() * 400 + 50,
+            rotation: (Math.random() - 0.5) * 90,
+          }
+        : t
+    ));
+  };
+
+  // Get the constructed name from board tiles
+  const getConstructedName = () => {
+    // Get first name (row 0) and last name (row 1)
+    const firstName = boardTiles[0]
+      .filter((t): t is Tile => t !== null)
+      .sort((a, b) => (a.boardCol || 0) - (b.boardCol || 0))
+      .map(t => t.letter === ' ' ? ' ' : t.letter)
+      .join('')
+      .trim();
+    
+    const lastName = boardTiles[1]
+      .filter((t): t is Tile => t !== null)
+      .sort((a, b) => (a.boardCol || 0) - (b.boardCol || 0))
+      .map(t => t.letter === ' ' ? ' ' : t.letter)
+      .join('')
+      .trim();
+    
+    if (!firstName && !lastName) return '';
+    if (!lastName) return firstName;
+    if (!firstName) return lastName;
+    return `${firstName} ${lastName}`;
+  };
 
   const handleDobColorChange = (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
@@ -650,24 +1137,226 @@ export default function Home() {
             );
           }}
         >
-          {/* Name section */}
+          {/* Name section - Scrabble Tiles */}
           <section className="grid sm:grid-cols-[2fr,3fr] gap-4 items-stretch border-b border-black pb-5">
             <div className="flex flex-col gap-1">
               <label htmlFor="name" className="font-semibold">
                 Name
               </label>
               <p className="text-[11px] text-zinc-700">
-                First and Last Name
+                Drag tiles from the pile to the board to construct your name. Tiles must be rotated correctly (0°) to place on board, except blank tiles. Use blank tiles (no letter) for spaces.
               </p>
+              <div className="mt-2 p-2 bg-yellow-100 border border-yellow-300 rounded">
+                <p className="text-[10px] font-semibold text-zinc-800 mb-1">Your Name:</p>
+                <p className="text-sm font-bold text-zinc-900 min-h-[20px]">
+                  {getConstructedName() || <span className="text-zinc-400 italic">Drag tiles to board to build your name...</span>}
+                </p>
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-3">
+              {/* Scrabble Board */}
+              <div className="scrabble-board border-4 border-[#8b6f47] bg-[#d4a574] p-4 rounded-lg shadow-[inset_0_0_20px_rgba(0,0,0,0.2)] select-none">
+                <p className="text-sm text-[#5a4a3a] mb-4 font-semibold">Name Board (Drag tiles here)</p>
+                {rotationError && (
+                  <p className="text-xs text-red-700 mb-3 font-semibold animate-pulse bg-red-100 px-2 py-1 rounded border border-red-300">
+                    ⚠ Tile must be rotated to 0° to place on board (blank tiles are exempt)
+                  </p>
+                )}
+                {/* First Name Row */}
+                <div className="mb-1">
+                  <p className="text-sm text-[#5a4a3a] mb-2 font-semibold">First Name:</p>
+                  <div className="flex gap-[2px] flex-wrap select-none">
+                    {boardTiles[0].map((tile, col) => (
+                      <div
+                        key={`0-${col}`}
+                        data-board-slot={`0-${col}`}
+                        data-board-row="0"
+                        data-board-col={col.toString()}
+                        onMouseEnter={() => {
+                          if (draggedTileId) {
+                            setDragOverBoardSlot(0 * 10 + col);
+                          }
+                        }}
+                        onMouseLeave={() => {
+                          setDragOverBoardSlot(null);
+                        }}
+                        className={`
+                          scrabble-square
+                          w-12 h-12
+                          flex items-center justify-center
+                          transition-all
+                          select-none
+                          ${dragOverBoardSlot === 0 * 10 + col
+                            ? 'border-yellow-400 bg-yellow-500/40 ring-2 ring-yellow-300' 
+                            : tile 
+                              ? 'border-[#8b6f47] bg-[#c9a87a]' 
+                              : 'border-[#8b6f47] bg-[#d4a574]'
+                          }
+                        `}
+                      >
+                      {tile && draggedTileId !== tile.id && (
+                        <div
+                          onMouseDown={(e) => {
+                            if (e.button === 0) {
+                              handleTileDragStart(tile.id, e);
+                            }
+                          }}
+                          className="scrabble-tile w-11 h-11 flex items-center justify-center font-bold text-xl border-2 border-zinc-800 bg-[#f5deb3] shadow-md cursor-grab active:cursor-grabbing select-none"
+                        >
+                          {tile.letter !== ' ' && (
+                            <span className="text-zinc-900 select-none">{tile.letter}</span>
+                          )}
+                        </div>
+                      )}
+                      {tile && draggedTileId === tile.id && (
+                        <div className="w-11 h-11 opacity-30 border-2 border-dashed border-zinc-400"></div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {/* Last Name Row */}
+                <div>
+                  <p className="text-sm text-[#5a4a3a] mb-2 mt-4 font-semibold">Last Name:</p>
+                  <div className="flex gap-[2px] flex-wrap select-none">
+                    {boardTiles[1].map((tile, col) => (
+                      <div
+                        key={`1-${col}`}
+                        data-board-slot={`1-${col}`}
+                        data-board-row="1"
+                        data-board-col={col.toString()}
+                        onMouseEnter={() => {
+                          if (draggedTileId) {
+                            setDragOverBoardSlot(1 * 10 + col);
+                          }
+                        }}
+                        onMouseLeave={() => {
+                          setDragOverBoardSlot(null);
+                        }}
+                        className={`
+                          scrabble-square
+                          w-12 h-12
+                          flex items-center justify-center
+                          transition-all
+                          select-none
+                          ${dragOverBoardSlot === 1 * 10 + col
+                            ? 'border-yellow-400 bg-yellow-500/40 ring-2 ring-yellow-300' 
+                            : tile 
+                              ? 'border-[#8b6f47] bg-[#c9a87a]' 
+                              : 'border-[#8b6f47] bg-[#d4a574]'
+                          }
+                        `}
+                      >
+                        {tile && draggedTileId !== tile.id && (
+                          <div
+                            onMouseDown={(e) => {
+                              if (e.button === 0) {
+                                handleTileDragStart(tile.id, e);
+                              }
+                            }}
+                            className="scrabble-tile w-11 h-11 flex items-center justify-center font-bold text-xl border-2 border-zinc-800 bg-[#f5deb3] shadow-md cursor-grab active:cursor-grabbing select-none"
+                          >
+                            {tile.letter !== ' ' && (
+                              <span className="text-zinc-900 select-none">{tile.letter}</span>
+                            )}
+                          </div>
+                        )}
+                        {tile && draggedTileId === tile.id && (
+                          <div className="w-11 h-11 opacity-30 border-2 border-dashed border-zinc-400"></div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+              
+              {/* Floating dragged board tile */}
+              {draggedTileId && (() => {
+                const draggedTile = tiles.find(t => t.id === draggedTileId);
+                if (!draggedTile || !draggedTile.onBoard) return null;
+                return (
+                  <div
+                    style={{
+                      position: 'fixed',
+                      left: `${draggedTile.x}px`,
+                      top: `${draggedTile.y}px`,
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: 10000,
+                      pointerEvents: 'none',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      MozUserSelect: 'none',
+                      msUserSelect: 'none',
+                    }}
+                    className="scrabble-tile w-12 h-12 flex items-center justify-center font-bold text-xl border-2 border-zinc-800 bg-[#f5deb3] shadow-lg"
+                  >
+                    {draggedTile.letter !== ' ' && (
+                      <span className="text-zinc-900" style={{ userSelect: 'none' }}>{draggedTile.letter}</span>
+                    )}
+                  </div>
+                );
+              })()}
+              
+              {/* Tile Pile */}
+              <div 
+                className="tile-container scrabble-board border-4 border-[#8b6f47] bg-[#d4a574] relative overflow-visible rounded-lg shadow-[inset_0_0_20px_rgba(0,0,0,0.2)]"
+                style={{ width: '100%', height: '300px', position: 'relative' }}
+              >
+                {tiles.filter(t => !t.onBoard).map(tile => (
+                  <div
+                    key={tile.id}
+                    onClick={(e) => {
+                      handleTileClick(tile.id, e);
+                    }}
+                    onMouseDown={(e) => {
+                      // Only start drag on left mouse button
+                      if (e.button === 0) {
+                        handleTileDragStart(tile.id, e);
+                      }
+                    }}
+                    style={{
+                      position: 'absolute',
+                      left: `${tile.x}px`,
+                      top: `${tile.y}px`,
+                      transform: `rotate(${tile.rotation}deg)`,
+                      zIndex: tile.zIndex,
+                      cursor: draggedTileId === tile.id ? 'grabbing' : 'grab',
+                      userSelect: 'none',
+                    }}
+                    className={`
+                      scrabble-tile
+                      w-12 h-12
+                      flex items-center justify-center
+                      font-bold text-xl
+                      border-2 border-zinc-800
+                      shadow-md
+                      transition-all duration-150
+                      bg-[#f5deb3] hover:bg-[#f0d4a0]
+                      ${draggedTileId === tile.id ? 'opacity-90 scale-110' : 'hover:scale-105'}
+                    `}
+                  >
+                    {tile.letter !== ' ' && (
+                      <span className="text-zinc-900 select-none">
+                        {tile.letter}
+                      </span>
+                    )}
+                  </div>
+                ))}
+                {tiles.filter(t => !t.onBoard).length === 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center text-[#5a4a3a] font-semibold">
+                    All tiles placed!
+                  </div>
+                )}
+              </div>
+              <p className="text-[9px] text-[#5a4a3a] mt-2 italic">
+                Click to bring tile forward • Drag to board to place • Scroll wheel while dragging to rotate • Drag from board back to pile to remove
+              </p>
               <input
                 id="name"
                 name="name"
-                type="text"
+                type="hidden"
+                value={getConstructedName()}
                 required
-                autoComplete="off"
-                className="border border-zinc-500 bg-yellow-50 px-2 py-[6px] tracking-[0.25em] uppercase placeholder:text-[10px] placeholder:text-zinc-500 focus:ring-0 focus:outline-none focus:border-blue-700"
               />
             </div>
           </section>
