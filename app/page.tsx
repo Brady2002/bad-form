@@ -1144,7 +1144,7 @@ export default function Home() {
                 Name
               </label>
               <p className="text-[11px] text-zinc-700">
-                Drag tiles from the pile to the board to construct your name. Tiles must be rotated correctly (0°) to place on board, except blank tiles. Use blank tiles (no letter) for spaces.
+                Drag tiles from the pile to the board to construct your name.
               </p>
               <div className="mt-2 p-2 bg-yellow-100 border border-yellow-300 rounded">
                 <p className="text-[10px] font-semibold text-zinc-800 mb-1">Your Name:</p>
@@ -1159,7 +1159,7 @@ export default function Home() {
                 <p className="text-sm text-[#5a4a3a] mb-4 font-semibold">Name Board (Drag tiles here)</p>
                 {rotationError && (
                   <p className="text-xs text-red-700 mb-3 font-semibold animate-pulse bg-red-100 px-2 py-1 rounded border border-red-300">
-                    ⚠ Tile must be rotated to 0° to place on board (blank tiles are exempt)
+                    ⚠ Tile must be rotated correctly to place on board
                   </p>
                 )}
                 {/* First Name Row */}
@@ -1348,9 +1348,6 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              <p className="text-[9px] text-[#5a4a3a] mt-2 italic">
-                Click to bring tile forward • Drag to board to place • Scroll wheel while dragging to rotate • Drag from board back to pile to remove
-              </p>
               <input
                 id="name"
                 name="name"
